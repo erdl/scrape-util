@@ -2,14 +2,14 @@
 from src.core.data_utils import Row, get_uid_generator, check_config, make_time_specs
 from src.core.error_utils import error_template
 import requests
-import time
+import datetime
 
 # an experimental shortcut to nicer errors :)
 webctrl_error = error_template('`webctrl` data-acquisition step')
 
 # Primary entry point for webctrl scrape.
 # Returns data & updated state.
-def acquire(project,config,state):
+def acquire(project,config,state,start_time,end_time):
     settings = config['settings']
     # check that config is valid, parse sensor
     # parameters, and generate time specifications
@@ -17,7 +17,7 @@ def acquire(project,config,state):
     params,times = setup(project,config,state)
     # generate a wrapper around `exec_query` with
     # user-supplied configurations pre-applied.
-    query = new_query(config['settings'])
+    query = new_query(config['settings'],start_time,end_time)
     # initialize collectors for formatted
     # data and the new `nonce` values.
     nonce,buffs,data = {},{},[]
@@ -30,7 +30,7 @@ def acquire(project,config,state):
         # get the buffer if it exists (default to empty list).
         buff = times[uid].get('buff',[])
         # query webctrl at `path` from `start` to `start` + `step`.
-        result = query(path,start,(start+step))
+        result = query(path)
         # make a generator for the `Row` type based
         # on the supplied identity variables.
         mkrow = lambda t,v: Row(*ident,float(t//1000),float(v))
@@ -48,12 +48,9 @@ def acquire(project,config,state):
         # filter rows by timestamp.
         fltr = lambda r: r.timestamp
         stamps = [fltr(r) for r in rows] # get all timestamps.
-        nonce[uid] = max(stamps) # set the new nonce value.
-        buffs[uid] = stamps + buff # set the new buff values.
         data += rows # add our rows to `data`.
     # add newly generate `nonce` to `state`, overwriting
     # old value if it exists.
-    state['nonce'] = nonce
     if settings.get('rolling-buffer',False):
         state = set_buffer(settings,state,buffs)
     return state,data
@@ -170,19 +167,20 @@ def setup_parameters(project,config,nonce):
 
 # Generate a pre-configured query callable
 # s.t. we don't all die of excess boilerplate.
-def new_query(settings):
-    tp = lambda t: time.strftime('%Y-%m-%d',time.gmtime(t))
+def new_query(settings,start_time,end_time):
+    start_time = datetime.datetime.strptime(start_time, '%m/%d/%Y').strftime('%Y-%m-%d')
+    end_time = datetime.datetime.strptime(end_time, '%m/%d/%Y').strftime('%Y-%m-%d')
     uri = settings['server']
     auth = ( settings['login']['name'], settings['login']['pass'] )
     # return a lambda fn that executes a query given
     # the args: query-string, start-time, end-time.
-    lam = lambda q,s,e : exec_query(uri,q,auth,tp(s),tp(e))
+    lam = lambda q : exec_query(uri,q,auth,start_time,end_time)
     return lam
 
 # Actually execute the query of the webctrl server.
-def exec_query(uri,sensor,auth,start,stop):
+def exec_query(uri,sensor,auth,start_time,end_time):
     print("querying: {}".format(sensor))
-    params = {'id':sensor,'start':start,'end':stop,'format':'json'}
+    params = {'id':sensor,'start':start_time,'end':end_time,'format':'json'}
     req = requests.post(uri,params=params,auth=tuple(auth))
     if req.status_code != 200:
         print(req.text)

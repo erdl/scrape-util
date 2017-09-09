@@ -58,7 +58,6 @@ def run_project(project, start_time, end_time):
     # push data to one or more destinations.
     state = export_data(project,config,state,data)
     # save/update the state file(s).
-    file_utils.save_state(project,state)
     print('finished project: {}\n'.format(project))
 
 
